@@ -47,6 +47,11 @@ export default function App() {
     }
   };
 
+  // Funzione chiamata dopo l'importazione di un backup per aggiornare la UI
+  const handleProfilesRefresh = () => {
+    setProfiles(getProfiles());
+  };
+
   const handleUpload = (content: string, type: 'nbib' | 'ris') => {
     try {
       let parsedArticles: Article[] = [];
@@ -129,7 +134,8 @@ export default function App() {
       <ProfileSelector 
         profiles={profiles} 
         onCreate={handleCreateProfile} 
-        onSelect={handleSelectProfile} 
+        onSelect={handleSelectProfile}
+        onImportSuccess={handleProfilesRefresh}
       />
     );
   }

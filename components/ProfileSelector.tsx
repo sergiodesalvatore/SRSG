@@ -1,23 +1,62 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { Profile } from '../types';
-import { Plus, ArrowRight, Sparkles, FolderOpen } from 'lucide-react';
+import { Plus, ArrowRight, Sparkles, FolderOpen, Download, Upload, Database } from 'lucide-react';
+import { validateAndImportData } from '../services/storageService';
 
 interface ProfileSelectorProps {
   profiles: Profile[];
   onSelect: (name: string) => void;
   onCreate: (name: string) => void;
+  onImportSuccess: () => void;
 }
 
 const LOGO_SRC = "data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTAwIiBoZWlnaHQ9IjEwMCIgdmlld0JveD0iMCAwIDEwMCAxMDAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CiAgPG1hc2sgaWQ9ImMiPgogICAgPGNpcmNsZSBjeD0iNTAiIGN5PSI1MCIgcj0iNTAiIGZpbGw9IndoaXRlIi8+CiAgPC9tYXNrPgogIDxnIG1hc2s9InVybCgjYykiPgogICAgPHBhdGggZD0iTTAgMCBINTAgQyAzMCAzMCAzMCA3MCA1MCAxMDAgSDAgWiIgZmlsbD0iIzI1NjNFQiIvPgogICAgPHBhdGggZD0iTTYwIDAgQyA0MCAzMCA0NSA1MCAxMDAgNTAgVjAgSDYwIFoiIGZpbGw9IiM4NkVGQUMiLz4KICAgIDxwYXRoIGQ9Ik02MCAxMDAgQyA0MCA3MCA0NSA1MCAxMDAgNTAgVjEwMCBINjAgWiIgZmlsbD0iI0ZERTA0NyIvPgogIDwvZz4KPC9zdmc+";
 
-export const ProfileSelector: React.FC<ProfileSelectorProps> = ({ profiles, onSelect, onCreate }) => {
+export const ProfileSelector: React.FC<ProfileSelectorProps> = ({ profiles, onSelect, onCreate, onImportSuccess }) => {
   const [newProfileName, setNewProfileName] = useState('');
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleCreate = () => {
     if (newProfileName.trim()) {
       onCreate(newProfileName);
       setNewProfileName('');
     }
+  };
+
+  const handleExportData = () => {
+    const dataStr = JSON.stringify(profiles, null, 2);
+    const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr);
+    
+    const exportFileDefaultName = `srsg-backup-${new Date().toISOString().slice(0, 10)}.json`;
+
+    const linkElement = document.createElement('a');
+    linkElement.setAttribute('href', dataUri);
+    linkElement.setAttribute('download', exportFileDefaultName);
+    linkElement.click();
+  };
+
+  const handleImportClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const content = event.target?.result as string;
+      const success = validateAndImportData(content);
+      if (success) {
+        alert('Data restored successfully!');
+        onImportSuccess();
+      } else {
+        alert('Invalid backup file. Please upload a valid SRGS JSON file.');
+      }
+    };
+    reader.readAsText(file);
+    // Reset input so same file can be selected again if needed
+    e.target.value = '';
   };
 
   return (
@@ -52,15 +91,15 @@ export const ProfileSelector: React.FC<ProfileSelectorProps> = ({ profiles, onSe
         </div>
 
         {/* Right Side: Profile Card */}
-        <div className="bg-white/80 backdrop-blur-xl rounded-3xl shadow-2xl border border-white/50 p-8 transform transition-all hover:shadow-indigo-200/50">
-          <div className="flex items-center justify-between mb-8">
+        <div className="bg-white/80 backdrop-blur-xl rounded-3xl shadow-2xl border border-white/50 p-8 transform transition-all hover:shadow-indigo-200/50 flex flex-col max-h-[85vh]">
+          <div className="flex-none flex items-center justify-between mb-8">
             <h2 className="text-xl font-bold text-slate-800">Your Projects</h2>
             <div className="h-8 w-8 bg-indigo-50 rounded-full flex items-center justify-center text-indigo-600">
               <FolderOpen size={18} />
             </div>
           </div>
           
-          <div className="space-y-4 mb-8 max-h-[320px] overflow-y-auto pr-2 custom-scrollbar">
+          <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar space-y-4 mb-8 min-h-[150px]">
             {profiles.length > 0 ? (
               profiles.map((profile) => (
                 <button
@@ -89,14 +128,14 @@ export const ProfileSelector: React.FC<ProfileSelectorProps> = ({ profiles, onSe
             )}
           </div>
 
-          <div className="pt-6 border-t border-slate-100">
+          <div className="flex-none pt-6 border-t border-slate-100">
             <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Start a new review</label>
-            <div className="flex gap-3">
+            <div className="flex gap-3 mb-6">
               <input
                 type="text"
                 value={newProfileName}
                 onChange={(e) => setNewProfileName(e.target.value)}
-                placeholder="Project Name (e.g., 'Osteoarthritis Review')"
+                placeholder="Project Name"
                 className="flex-1 px-4 py-3.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 focus:bg-white outline-none transition-all font-medium text-slate-700 placeholder:text-slate-400"
                 onKeyDown={(e) => e.key === 'Enter' && handleCreate()}
               />
@@ -107,6 +146,36 @@ export const ProfileSelector: React.FC<ProfileSelectorProps> = ({ profiles, onSe
               >
                 <Plus size={24} />
               </button>
+            </div>
+
+            {/* Data Management Section */}
+            <div className="pt-4 border-t border-slate-100 flex items-center justify-between">
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1">
+                    <Database size={10} /> Data Sync
+                </span>
+                <div className="flex gap-2">
+                    <button 
+                        onClick={handleExportData}
+                        title="Backup Data"
+                        className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-600 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg transition-colors"
+                    >
+                        <Download size={12} /> Backup
+                    </button>
+                    <button 
+                        onClick={handleImportClick}
+                        title="Restore Data"
+                        className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 border border-indigo-100 rounded-lg transition-colors"
+                    >
+                        <Upload size={12} /> Restore
+                    </button>
+                    <input 
+                        type="file" 
+                        ref={fileInputRef}
+                        onChange={handleFileChange}
+                        accept=".json"
+                        className="hidden"
+                    />
+                </div>
             </div>
           </div>
         </div>
