@@ -1,0 +1,5 @@
+{
+  "name": "SRSG Screeny",
+  "description": "A systematic review screening tool to parse NBIB/RIS files, screen articles, and export decisions to Excel.",
+  "requestFramePermissions": []
+}
