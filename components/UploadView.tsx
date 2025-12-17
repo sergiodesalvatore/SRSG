@@ -1,3 +1,4 @@
+
 import React, { useState } from 'react';
 import { Upload, FileText, ArrowLeft, Play, Trash2, FileType } from 'lucide-react';
 
@@ -145,7 +146,7 @@ export const UploadView: React.FC<UploadViewProps> = ({
                   value={textInput}
                   onChange={(e) => setTextInput(e.target.value)}
                   placeholder="Paste raw content from your .nbib or .ris file here..."
-                  className="w-full pl-12 pr-4 py-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 focus:bg-white outline-none text-sm font-mono h-32 resize-none transition-all placeholder:text-slate-400"
+                  className="w-full pl-12 pr-4 py-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 focus:bg-white outline-none text-sm font-mono h-32 resize-none transition-all text-slate-900 placeholder:text-slate-400"
                 />
              </div>
              

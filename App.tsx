@@ -1,6 +1,8 @@
+
 import React, { useState, useEffect } from 'react';
 import { Profile, Article, Selections } from './types';
 import { getProfiles, saveProfiles } from './services/storageService';
+import { syncDataToCloud, fetchDataFromCloud } from './services/cloudService';
 import { parseNBIB, parseRIS } from './services/parserService';
 import { ProfileSelector } from './components/ProfileSelector';
 import { UploadView } from './components/UploadView';
@@ -12,19 +14,36 @@ export default function App() {
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [currentProfile, setCurrentProfile] = useState<Profile | null>(null);
   const [view, setView] = useState<AppView>('profile');
+  const [isLoadingCloud, setIsLoadingCloud] = useState(false);
   
-  // Session State
   const [articles, setArticles] = useState<Article[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [selections, setSelections] = useState<Selections>({});
 
+  // Caricamento iniziale
   useEffect(() => {
-    setProfiles(getProfiles());
+    const loadData = async () => {
+      // Carica prima i dati locali per velocità
+      const localData = getProfiles();
+      setProfiles(localData);
+
+      // Se loggato, prova a scaricare dal cloud
+      if (localStorage.getItem('srsg_token')) {
+        setIsLoadingCloud(true);
+        const cloudData = await fetchDataFromCloud();
+        if (cloudData) {
+          saveProfiles(cloudData);
+          setProfiles(cloudData);
+        }
+        setIsLoadingCloud(false);
+      }
+    };
+    loadData();
   }, []);
 
-  const handleCreateProfile = (name: string) => {
+  const handleCreateProfile = async (name: string) => {
     if (profiles.some(p => p.name === name)) {
-      alert('Profile already exists');
+      alert('Il progetto esiste già');
       return;
     }
     const newProfile: Profile = {
@@ -37,6 +56,11 @@ export default function App() {
     setProfiles(updatedProfiles);
     setCurrentProfile(newProfile);
     setView('upload');
+    
+    // Sync immediato al cloud se loggato
+    if (localStorage.getItem('srsg_token')) {
+      await syncDataToCloud(updatedProfiles);
+    }
   };
 
   const handleSelectProfile = (name: string) => {
@@ -47,7 +71,6 @@ export default function App() {
     }
   };
 
-  // Funzione chiamata dopo l'importazione di un backup per aggiornare la UI
   const handleProfilesRefresh = () => {
     setProfiles(getProfiles());
   };
@@ -57,20 +80,13 @@ export default function App() {
       let parsedArticles: Article[] = [];
       if (type === 'nbib') parsedArticles = parseNBIB(content);
       if (type === 'ris') parsedArticles = parseRIS(content);
-
-      if (parsedArticles.length === 0) {
-        alert('No articles found in file.');
-        return;
-      }
+      if (parsedArticles.length === 0) return alert('Nessun articolo trovato nel file');
 
       setArticles(parsedArticles);
       setSelections({});
       setCurrentIndex(0);
       setView('screening');
-    } catch (error) {
-      console.error(error);
-      alert('Error parsing file.');
-    }
+    } catch (e) { alert('Errore durante la lettura del file'); }
   };
 
   const handleContinueSession = () => {
@@ -82,13 +98,7 @@ export default function App() {
     }
   };
 
-  const handleDeleteSession = () => {
-    if (!currentProfile) return;
-    const updatedProfile = { ...currentProfile, session: null };
-    updateProfile(updatedProfile);
-  };
-
-  const handleSaveSession = (idx: number, sels: Selections) => {
+  const handleSaveSession = async (idx: number, sels: Selections) => {
     if (!currentProfile) return;
     const updatedProfile: Profile = {
       ...currentProfile,
@@ -99,72 +109,62 @@ export default function App() {
         timestamp: new Date().toISOString()
       }
     };
-    updateProfile(updatedProfile);
     
-    // Update local state to match saved state
-    setCurrentIndex(idx);
-    setSelections(sels);
-  };
-
-  const updateProfile = (updatedProfile: Profile) => {
-    const updatedProfiles = profiles.map(p => 
-      p.name === updatedProfile.name ? updatedProfile : p
-    );
+    const updatedProfiles = profiles.map(p => p.name === updatedProfile.name ? updatedProfile : p);
     saveProfiles(updatedProfiles);
     setProfiles(updatedProfiles);
     setCurrentProfile(updatedProfile);
+    setCurrentIndex(idx);
+    setSelections(sels);
+
+    if (localStorage.getItem('srsg_token')) {
+      await syncDataToCloud(updatedProfiles);
+    }
   };
 
-  const handleExit = () => {
-    setArticles([]);
-    setSelections({});
-    setCurrentIndex(0);
-    setCurrentProfile(null);
-    setView('profile');
+  const handleDeleteSession = async () => {
+    if (!currentProfile) return;
+    const updatedProfile = { ...currentProfile, session: null };
+    const updatedProfiles = profiles.map(p => p.name === updatedProfile.name ? updatedProfile : p);
+    saveProfiles(updatedProfiles);
+    setProfiles(updatedProfiles);
+    setCurrentProfile(updatedProfile);
+    
+    if (localStorage.getItem('srsg_token')) {
+      await syncDataToCloud(updatedProfiles);
+    }
   };
 
-  const handleBackToProfile = () => {
-    setCurrentProfile(null);
-    setView('profile');
-  };
+  if (view === 'profile') return (
+    <ProfileSelector 
+      profiles={profiles} 
+      onCreate={handleCreateProfile} 
+      onSelect={handleSelectProfile} 
+      onImportSuccess={handleProfilesRefresh} 
+    />
+  );
+  
+  if (view === 'upload' && currentProfile) return (
+    <UploadView 
+      profileName={currentProfile.name} 
+      hasSavedSession={!!currentProfile.session} 
+      onUpload={handleUpload} 
+      onContinue={handleContinueSession} 
+      onDeleteSession={handleDeleteSession} 
+      onBack={() => { setArticles([]); setSelections({}); setCurrentProfile(null); setView('profile'); }}
+    />
+  );
 
-  // Render logic
-  if (view === 'profile') {
-    return (
-      <ProfileSelector 
-        profiles={profiles} 
-        onCreate={handleCreateProfile} 
-        onSelect={handleSelectProfile}
-        onImportSuccess={handleProfilesRefresh}
-      />
-    );
-  }
+  if (view === 'screening' && currentProfile) return (
+    <ScreeningInterface 
+      articles={articles} 
+      initialIndex={currentIndex} 
+      initialSelections={selections} 
+      profileName={currentProfile.name} 
+      onSave={handleSaveSession} 
+      onExit={() => { setArticles([]); setSelections({}); setCurrentProfile(null); setView('profile'); }}
+    />
+  );
 
-  if (view === 'upload' && currentProfile) {
-    return (
-      <UploadView 
-        profileName={currentProfile.name}
-        hasSavedSession={!!currentProfile.session}
-        onUpload={handleUpload}
-        onContinue={handleContinueSession}
-        onDeleteSession={handleDeleteSession}
-        onBack={handleBackToProfile}
-      />
-    );
-  }
-
-  if (view === 'screening' && currentProfile) {
-    return (
-      <ScreeningInterface 
-        articles={articles}
-        initialIndex={currentIndex}
-        initialSelections={selections}
-        profileName={currentProfile.name}
-        onSave={handleSaveSession}
-        onExit={handleExit}
-      />
-    );
-  }
-
-  return <div>Loading...</div>;
+  return <div className="min-h-screen flex items-center justify-center font-bold text-slate-400">Caricamento in corso...</div>;
 }
