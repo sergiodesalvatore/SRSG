@@ -1,140 +1,169 @@
+
 import { Article } from '../types';
 
-export const parseNBIB = (content: string): Article[] => {
-  let records: string[] = [];
-  if (content.includes('\n\n')) {
-    records = content.split(/\n\n+/).filter(r => r.trim() && r.includes('PMID'));
-  } else {
-    records = content.split(/PMID-/).filter(r => r.trim());
-  }
+const generateId = () => Math.random().toString(36).substr(2, 9);
 
+const normalizeTitle = (title: string) => 
+  title?.toLowerCase().replace(/[^a-z0-9]/g, '') || '';
+
+/**
+ * Extracts the value from a Medline/NBIB line, correctly handling the separator.
+ * Standard format is "TAG - VALUE" or "TAG-VALUE".
+ */
+const getMedlineValue = (line: string): string => {
+  const dashIndex = line.indexOf('-');
+  if (dashIndex === -1) return '';
+  // Skip the dash and any immediately following space
+  let startIndex = dashIndex + 1;
+  if (line[startIndex] === ' ') startIndex++;
+  return line.substring(startIndex).trim();
+};
+
+export const parseRIS = (content: string, fileName: string): Article[] => {
   const articles: Article[] = [];
-  records.forEach((record) => {
-    const lines = record.split('\n');
-    let pmid = '';
-    let title = '';
-    let abstract = '';
-    let doi = '';
-    let authors: string[] = [];
+  const entries = content.split(/ER  -/);
+
+  entries.forEach(entry => {
+    if (!entry.trim()) return;
+    const lines = entry.split(/\r?\n/);
+    const article: any = { 
+      id: generateId(), 
+      sourceFile: fileName, 
+      pmid: 'N/A', 
+      doi: 'N/A', 
+      authors: '', 
+      title: '', 
+      abstract: '', 
+      journal: '' 
+    };
     
-    // Journal fields
-    let journalFull = '';
-    let journalAbbr = '';
-    let source = '';
-    let place = '';
-
-    for (let i = 0; i < lines.length; i++) {
-      let line = lines[i];
-      if (!line.includes('-')) continue;
-      // Changed regex to accept 1-4 chars tag (e.g. J - )
-      const match = line.match(/^([A-Z]{1,4})\s*-\s*(.*)/);
-      if (!match) continue;
+    lines.forEach(line => {
+      if (line.length < 6) return;
+      const tag = line.substring(0, 2).trim();
+      const val = line.substring(6).trim();
+      if (!tag) return;
       
-      const field = match[1].trim();
-      let value = match[2].trim();
-      
-      while (i + 1 < lines.length) {
-        const nextLine = lines[i + 1];
-        // Check if next line is a new tag
-        if (!nextLine || nextLine.match(/^[A-Z]{1,4}\s*-/)) break;
-        i++;
-        value += ' ' + nextLine.trim();
+      switch (tag) {
+        case 'TI':
+        case 'T1':
+          article.title = (article.title ? article.title + ' ' : '') + val;
+          break;
+        case 'AB':
+          article.abstract = (article.abstract ? article.abstract + ' ' : '') + val;
+          break;
+        case 'JO':
+        case 'JF':
+          article.journal = val;
+          break;
+        case 'DO':
+          article.doi = val;
+          break;
+        case 'AU':
+          article.authors = (article.authors ? article.authors + '; ' : '') + val;
+          break;
       }
+    });
+    
+    if (article.title) articles.push(article as Article);
+  });
+  return articles;
+};
 
-      if (field === 'PMID') pmid = value.split(/\s+/)[0];
-      else if (field === 'TI') title = value;
-      else if (field === 'AB') abstract = value;
-      else if (field === 'JT') journalFull = value; // Full Journal Title
-      else if (field === 'TA') journalAbbr = value; // Abbreviation
-      else if (field === 'SO') source = value;      // Source string
-      else if (field === 'PL') place = value;       // Place of publication (fallback)
-      else if (field === 'AID' || (field === 'LID' && !doi)) {
-        const cleanValue = value.replace(/\[.*?\]/g, '').trim();
-        if (cleanValue.startsWith('10.')) {
-          doi = cleanValue;
+export const parseNBIB = (content: string, fileName: string): Article[] => {
+  const articles: Article[] = [];
+  // NBIB records start with PMID- 
+  const entries = content.split(/(?=PMID-)/);
+
+  entries.forEach(entry => {
+    if (!entry.trim() || !entry.includes('PMID-')) return;
+    const article: any = { 
+      id: generateId(), 
+      sourceFile: fileName, 
+      pmid: 'N/A', 
+      doi: 'N/A', 
+      authors: '', 
+      title: '', 
+      abstract: '', 
+      journal: '' 
+    };
+    
+    const lines = entry.split(/\r?\n/);
+    let lastTag = '';
+    
+    lines.forEach(line => {
+      // Tags are 1-4 uppercase letters followed by optional spaces and a hyphen
+      const tagMatch = line.match(/^([A-Z]{1,4})\s*-/);
+      
+      if (tagMatch) {
+        lastTag = tagMatch[1];
+        const value = getMedlineValue(line);
+        
+        switch (lastTag) {
+          case 'PMID':
+            article.pmid = value;
+            break;
+          case 'TI':
+            article.title = (article.title ? article.title + ' ' : '') + value;
+            break;
+          case 'AB':
+            article.abstract = (article.abstract ? article.abstract + ' ' : '') + value;
+            break;
+          case 'JT':
+            article.journal = value;
+            break;
+          case 'AID':
+            if (value.toLowerCase().includes('[doi]')) {
+              article.doi = value.replace(/\[doi\]/gi, '').trim();
+            }
+            break;
+          case 'AU':
+            // Append author. Medline format has one AU tag per author.
+            article.authors = (article.authors ? article.authors + '; ' : '') + value;
+            break;
         }
+      } else if (line.startsWith('      ') && lastTag) {
+        // Multi-line field continuation
+        const value = line.trim();
+        if (lastTag === 'TI') article.title += ' ' + value;
+        else if (lastTag === 'AB') article.abstract += ' ' + value;
+        else if (lastTag === 'AU') article.authors += ' ' + value;
       }
-      else if (field === 'AU' || field === 'FAU') authors.push(value);
-    }
+    });
 
-    // Prioritize Full Title > Abbreviation > Source > Place
-    const journal = journalFull || journalAbbr || (source ? source.split('.')[0] : '') || place || 'Unknown Journal';
-
-    if (title) {
-      articles.push({
-        pmid: pmid || 'N/A',
-        title,
-        abstract: abstract || 'No abstract available',
-        journal: journal,
-        doi: doi || 'N/A',
-        authors: authors.slice(0, 5).join('; ') || 'Unknown',
-      });
+    if (article.title) {
+      article.title = article.title.trim();
+      article.abstract = article.abstract.trim();
+      article.authors = article.authors.trim();
+      articles.push(article as Article);
     }
   });
   return articles;
 };
 
-export const parseRIS = (content: string): Article[] => {
-  const records = content.split(/\nER\s*-\s*\n|\nER\s*-\s*$/).filter(r => r.trim());
-  const articles: Article[] = [];
+export const processUploads = (files: {content: string, name: string, type: 'ris' | 'nbib'}[], existingArticles: Article[]): { articles: Article[], duplicates: number } => {
+  let allParsed: Article[] = [];
   
-  records.forEach((record) => {
-    if (!record.trim()) return;
-    const lines = record.split('\n');
-    let title = '';
-    let abstract = '';
-    let doi = '';
-    let authors: string[] = [];
-    let pmid = '';
-    
-    // Journal fields
-    let journalFull = '';
-    let journalName = '';
-    let secondaryTitle = '';
-    let journalAbbr = '';
-    let source = '';
-    let j1 = '';
-    let j2 = '';
+  files.forEach(f => {
+    const parsed = f.type === 'ris' ? parseRIS(f.content, f.name) : parseNBIB(f.content, f.name);
+    allParsed = [...allParsed, ...parsed];
+  });
 
-    lines.forEach(line => {
-      const trimmed = line.trim();
-      if (!trimmed) return;
-      const match = trimmed.match(/^([A-Z0-9]{2})\s*-\s*(.*)/); // RIS tags are usually 2 chars
-      if (!match) return;
-      
-      const field = match[1].trim();
-      const value = match[2].trim();
-      if (!value) return;
+  const unique: Article[] = [...existingArticles];
+  let duplicatesCount = 0;
 
-      if (field === 'TI' || field === 'T1') title = value;
-      else if (field === 'AB' || field === 'N2') abstract = value;
-      else if (field === 'JF') journalFull = value;       // Journal Full
-      else if (field === 'JO') journalName = value;       // Journal Name
-      else if (field === 'T2') secondaryTitle = value;    // Secondary Title
-      else if (field === 'JA') journalAbbr = value;       // Journal Abbreviation
-      else if (field === 'J1') j1 = value;                // User def 1 (often journal)
-      else if (field === 'J2') j2 = value;                // User def 2
-      else if (field === 'SO') source = value;            // Source
-      else if (field === 'AU' || field === 'A1') authors.push(value);
-      else if (field === 'M1' || field === 'ID' || field === 'AN') { if (!pmid) pmid = value; }
-      else if (field === 'DO') {
-        doi = value.replace(/\[.*?\]/g, '').replace(/\s+/g, ' ').trim();
-      }
+  allParsed.forEach(article => {
+    const isDup = unique.some(existing => {
+      const doiMatch = article.doi !== 'N/A' && existing.doi !== 'N/A' && article.doi === existing.doi;
+      const titleMatch = normalizeTitle(article.title) === normalizeTitle(existing.title);
+      return doiMatch || titleMatch;
     });
 
-    // Prioritize Full Name > Name > Secondary Title > Abbreviation > J1 > J2 > Source
-    const journal = journalFull || journalName || secondaryTitle || journalAbbr || j1 || j2 || source || 'Unknown Journal';
-
-    if (title) {
-      articles.push({
-        pmid: pmid || title.substring(0, 15),
-        title,
-        abstract: abstract || 'No abstract available',
-        journal: journal,
-        doi: doi || 'N/A',
-        authors: authors.slice(0, 5).join('; ') || 'Unknown',
-      });
+    if (isDup) {
+      duplicatesCount++;
+    } else {
+      unique.push(article);
     }
   });
-  return articles;
+
+  return { articles: unique, duplicates: duplicatesCount };
 };
