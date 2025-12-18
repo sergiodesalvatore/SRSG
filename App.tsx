@@ -2,51 +2,48 @@
 import React, { useState, useEffect } from 'react';
 import { Profile, ProjectSettings, Session, Selections } from './types';
 import { getProfiles, saveProfiles } from './services/storageService';
-import { syncDataToCloud, fetchDataFromCloud, logout as cloudLogout } from './services/cloudService';
+import { syncDataToCloud, fetchDataFromCloud, logout as cloudLogout, fetchSharedProjects, updateSharedProjectOnCloud } from './services/cloudService';
 import { ProfileSelector } from './components/ProfileSelector';
 import { ScreeningInterface } from './components/ScreeningInterface';
 import { UploadView } from './components/UploadView';
 import { Auth } from './components/Auth';
 import { processUploads } from './services/parserService';
 
+// Estendiamo il tipo Profile localmente per gestire metadati cloud
+interface AppProfile extends Profile {
+  isShared?: boolean;
+  ownerEmail?: string;
+}
+
 export default function App() {
   const [user, setUser] = useState<string | null>(localStorage.getItem('srsg_user'));
-  const [profiles, setProfiles] = useState<Profile[]>([]);
+  const [profiles, setProfiles] = useState<AppProfile[]>([]);
   const [currentProfileName, setCurrentProfileName] = useState<string | null>(null);
   const [view, setView] = useState<'profile' | 'upload' | 'screening'>('profile');
   const [loading, setLoading] = useState(true);
-  const [recoveryToken, setRecoveryToken] = useState<string | null>(null);
-
-  useEffect(() => {
-    const hash = window.location.hash;
-    if (hash && hash.includes('access_token=')) {
-      const params = new URLSearchParams(hash.replace('#', '?'));
-      const token = params.get('access_token');
-      const type = params.get('type');
-      if (token && type === 'recovery') {
-        setRecoveryToken(token);
-        window.history.replaceState(null, '', window.location.pathname);
-      }
-    }
-  }, []);
 
   const refreshData = async () => {
     try {
       const token = localStorage.getItem('srsg_token');
-      if (!token) {
+      const email = localStorage.getItem('srsg_user');
+      if (!token || !email) {
         setProfiles([]);
         setLoading(false);
         return;
       }
       
-      const cloudData = await fetchDataFromCloud();
-      if (cloudData) {
-        setProfiles(cloudData);
-        saveProfiles(cloudData);
-      } else {
-        const local = getProfiles();
-        setProfiles(local);
-      }
+      const [ownData, sharedData] = await Promise.all([
+        fetchDataFromCloud(),
+        fetchSharedProjects(email)
+      ]);
+
+      const combined: AppProfile[] = [
+        ...(ownData || []),
+        ...(sharedData || [])
+      ];
+
+      setProfiles(combined);
+      saveProfiles(ownData || []); // Salviamo localmente solo i propri per ora
     } catch (err) {
       console.error("Refresh error:", err);
       setProfiles(getProfiles());
@@ -79,15 +76,16 @@ export default function App() {
   };
 
   const handleDeleteProfile = (name: string) => {
+    const prof = profiles.find(p => p.name === name);
+    if (prof?.isShared) {
+      alert("Non puoi eliminare un progetto condiviso da altri. Contatta il proprietario.");
+      return;
+    }
+
     if (!window.confirm(`Sei sicuro di voler eliminare il progetto "${name}"? L'azione è irreversibile.`)) return;
     
-    // Create the updated list first
-    const updatedProfiles = profiles.filter(p => p.name !== name);
-    
-    // Update state
-    setProfiles(updatedProfiles);
-    
-    // Persist changes
+    const updatedProfiles = profiles.filter(p => p.name !== name && !p.isShared);
+    setProfiles(prev => prev.filter(p => p.name !== name));
     saveProfiles(updatedProfiles);
     syncDataToCloud(updatedProfiles);
 
@@ -99,15 +97,7 @@ export default function App() {
 
   const currentProfile = profiles.find(p => p.name === currentProfileName);
 
-  if (!user || recoveryToken) {
-    return (
-      <Auth 
-        onLoginSuccess={handleLoginSuccess} 
-        recoveryToken={recoveryToken}
-        initialMode={recoveryToken ? 'update' : 'login'}
-      />
-    );
-  }
+  if (!user) return <Auth onLoginSuccess={handleLoginSuccess} />;
 
   if (loading) return (
     <div className="h-screen flex flex-col items-center justify-center bg-slate-50">
@@ -125,9 +115,10 @@ export default function App() {
         setView(p?.session?.articles?.length ? 'screening' : 'upload');
       }} 
       onCreate={(name, settings) => {
-        const newProfile: Profile = { name, createdAt: new Date().toLocaleDateString(), settings, session: null };
-        const updated = [...profiles, newProfile];
-        setProfiles(updated);
+        const newProfile: AppProfile = { name, createdAt: new Date().toLocaleDateString(), settings, session: null };
+        const myOwn = profiles.filter(p => !p.isShared);
+        const updated = [...myOwn, newProfile];
+        setProfiles(prev => [...prev, newProfile]);
         saveProfiles(updated);
         syncDataToCloud(updated);
         setCurrentProfileName(name);
@@ -148,10 +139,17 @@ export default function App() {
           articles, currentIndex: 0, selections: currentProfile.session?.selections || {},
           timestamp: new Date().toISOString(), duplicatesCount: duplicates
         };
-        const updatedProfiles = profiles.map(p => p.name === currentProfile.name ? { ...p, session: newSession } : p);
-        setProfiles(updatedProfiles);
-        saveProfiles(updatedProfiles);
-        syncDataToCloud(updatedProfiles);
+        const updatedProfile = { ...currentProfile, session: newSession };
+        
+        // Se è condiviso, dobbiamo aggiornare l'owner, altrimenti noi stessi
+        if (currentProfile.isShared && currentProfile.ownerEmail) {
+          updateSharedProjectOnCloud(currentProfile.ownerEmail, updatedProfile).then(() => refreshData());
+        } else {
+          const myOwn = profiles.filter(p => !p.isShared).map(p => p.name === currentProfile.name ? updatedProfile : p);
+          setProfiles(prev => prev.map(p => p.name === currentProfile.name ? updatedProfile : p));
+          saveProfiles(myOwn);
+          syncDataToCloud(myOwn);
+        }
         setView('screening');
       }}
       onBack={() => setView('profile')}
@@ -160,19 +158,20 @@ export default function App() {
 
   const handleScreeningSave = (idx: number, sels: Selections, updatedSettings?: ProjectSettings) => {
     if (!currentProfile) return;
-    const updatedProfiles = profiles.map(p => {
-      if (p.name === currentProfile.name) {
-        return { 
-          ...p, 
-          settings: updatedSettings || p.settings,
-          session: { ...p.session!, currentIndex: idx, selections: sels } 
-        };
-      }
-      return p;
-    });
-    setProfiles(updatedProfiles);
-    saveProfiles(updatedProfiles);
-    syncDataToCloud(updatedProfiles);
+    const updatedProfile = { 
+      ...currentProfile, 
+      settings: updatedSettings || currentProfile.settings,
+      session: { ...currentProfile.session!, currentIndex: idx, selections: sels } 
+    };
+
+    if (currentProfile.isShared && currentProfile.ownerEmail) {
+      updateSharedProjectOnCloud(currentProfile.ownerEmail, updatedProfile).then(() => refreshData());
+    } else {
+      const myOwn = profiles.filter(p => !p.isShared).map(p => p.name === currentProfile.name ? updatedProfile : p);
+      setProfiles(prev => prev.map(p => p.name === currentProfile.name ? updatedProfile : p));
+      saveProfiles(myOwn);
+      syncDataToCloud(myOwn);
+    }
   };
 
   if (view === 'screening' && currentProfile?.session) return (
