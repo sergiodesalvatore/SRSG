@@ -9,7 +9,6 @@ import { UploadView } from './components/UploadView';
 import { Auth } from './components/Auth';
 import { processUploads } from './services/parserService';
 
-// Estendiamo il tipo Profile localmente per gestire metadati cloud
 interface AppProfile extends Profile {
   isShared?: boolean;
   ownerEmail?: string;
@@ -43,7 +42,7 @@ export default function App() {
       ];
 
       setProfiles(combined);
-      saveProfiles(ownData || []); // Salviamo localmente solo i propri per ora
+      saveProfiles(ownData || []);
     } catch (err) {
       console.error("Refresh error:", err);
       setProfiles(getProfiles());
@@ -75,19 +74,39 @@ export default function App() {
     setTimeout(() => setLoading(false), 500);
   };
 
-  const handleDeleteProfile = (name: string) => {
-    const prof = profiles.find(p => p.name === name);
-    if (prof?.isShared) {
-      alert("Non puoi eliminare un progetto condiviso da altri. Contatta il proprietario.");
+  const handleDeleteProfile = async (name: string) => {
+    const profToDelete = profiles.find(p => p.name === name);
+    if (!profToDelete) return;
+
+    if (profToDelete.isShared) {
+      alert("You cannot delete a shared project. Only the owner can do that.");
       return;
     }
 
-    if (!window.confirm(`Sei sicuro di voler eliminare il progetto "${name}"? L'azione è irreversibile.`)) return;
+    if (!window.confirm(`Are you sure you want to delete "${name}"? This will permanently remove it from the cloud database.`)) return;
     
-    const updatedProfiles = profiles.filter(p => p.name !== name && !p.isShared);
-    setProfiles(prev => prev.filter(p => p.name !== name));
-    saveProfiles(updatedProfiles);
-    syncDataToCloud(updatedProfiles);
+    // 1. Filtra localmente i progetti di proprietà (escludendo quelli condivisi che non vanno risalvati nel nostro 'data' di Supabase)
+    const ownedProfiles = profiles.filter(p => !p.isShared && p.name !== name);
+    
+    // 2. Aggiorna lo stato UI subito per feedback istantaneo
+    const nextUiProfiles = profiles.filter(p => p.name !== name);
+    setProfiles(nextUiProfiles);
+
+    // 3. Sincronizza col cloud inviando l'array aggiornato (senza il progetto cancellato)
+    try {
+      setLoading(true);
+      await syncDataToCloud(ownedProfiles);
+      saveProfiles(ownedProfiles);
+      console.log("Sync success after deletion");
+      // Forza un ricaricamento completo per essere sicuri
+      await refreshData();
+    } catch (err) {
+      alert("Error syncing deletion to Cloud. Please check your Supabase table has a Primary Key on 'id'.");
+      // Se fallisce, ripristina lo stato precedente
+      await refreshData();
+    } finally {
+      setLoading(false);
+    }
 
     if (currentProfileName === name) {
       setCurrentProfileName(null);
@@ -102,7 +121,7 @@ export default function App() {
   if (loading) return (
     <div className="h-screen flex flex-col items-center justify-center bg-slate-50">
       <div className="h-12 w-12 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin mb-4"></div>
-      <p className="font-black text-slate-900 uppercase tracking-widest text-[10px]">Accessing Database...</p>
+      <p className="font-black text-slate-900 uppercase tracking-widest text-[10px]">Updating Database...</p>
     </div>
   );
 
@@ -114,15 +133,23 @@ export default function App() {
         const p = profiles.find(pr => pr.name === name);
         setView(p?.session?.articles?.length ? 'screening' : 'upload');
       }} 
-      onCreate={(name, settings) => {
+      onCreate={async (name, settings) => {
         const newProfile: AppProfile = { name, createdAt: new Date().toLocaleDateString(), settings, session: null };
         const myOwn = profiles.filter(p => !p.isShared);
         const updated = [...myOwn, newProfile];
-        setProfiles(prev => [...prev, newProfile]);
-        saveProfiles(updated);
-        syncDataToCloud(updated);
-        setCurrentProfileName(name);
-        setView('upload');
+        
+        try {
+          setLoading(true);
+          await syncDataToCloud(updated);
+          setProfiles(prev => [...prev, newProfile]);
+          saveProfiles(updated);
+          setCurrentProfileName(name);
+          setView('upload');
+        } catch (e) {
+          alert("Could not create project on cloud. Please check connection.");
+        } finally {
+          setLoading(false);
+        }
       }} 
       onDelete={handleDeleteProfile}
       onImportSuccess={refreshData}
@@ -133,7 +160,7 @@ export default function App() {
   if (view === 'upload' && currentProfile) return (
     <UploadView 
       profileName={currentProfile.name}
-      onUploadMultiple={(files) => {
+      onUploadMultiple={async (files) => {
         const { articles, duplicates } = processUploads(files, currentProfile.session?.articles || []);
         const newSession: Session = {
           articles, currentIndex: 0, selections: currentProfile.session?.selections || {},
@@ -141,22 +168,29 @@ export default function App() {
         };
         const updatedProfile = { ...currentProfile, session: newSession };
         
-        // Se è condiviso, dobbiamo aggiornare l'owner, altrimenti noi stessi
-        if (currentProfile.isShared && currentProfile.ownerEmail) {
-          updateSharedProjectOnCloud(currentProfile.ownerEmail, updatedProfile).then(() => refreshData());
-        } else {
-          const myOwn = profiles.filter(p => !p.isShared).map(p => p.name === currentProfile.name ? updatedProfile : p);
-          setProfiles(prev => prev.map(p => p.name === currentProfile.name ? updatedProfile : p));
-          saveProfiles(myOwn);
-          syncDataToCloud(myOwn);
+        try {
+          setLoading(true);
+          if (currentProfile.isShared && currentProfile.ownerEmail) {
+            await updateSharedProjectOnCloud(currentProfile.ownerEmail, updatedProfile);
+            await refreshData();
+          } else {
+            const myOwn = profiles.filter(p => !p.isShared).map(p => p.name === currentProfile.name ? updatedProfile : p);
+            await syncDataToCloud(myOwn);
+            setProfiles(prev => prev.map(p => p.name === currentProfile.name ? updatedProfile : p));
+            saveProfiles(myOwn);
+          }
+          setView('screening');
+        } catch (e) {
+          alert("Upload failed. Try again.");
+        } finally {
+          setLoading(false);
         }
-        setView('screening');
       }}
       onBack={() => setView('profile')}
     />
   );
 
-  const handleScreeningSave = (idx: number, sels: Selections, updatedSettings?: ProjectSettings) => {
+  const handleScreeningSave = async (idx: number, sels: Selections, updatedSettings?: ProjectSettings) => {
     if (!currentProfile) return;
     const updatedProfile = { 
       ...currentProfile, 
@@ -164,13 +198,18 @@ export default function App() {
       session: { ...currentProfile.session!, currentIndex: idx, selections: sels } 
     };
 
-    if (currentProfile.isShared && currentProfile.ownerEmail) {
-      updateSharedProjectOnCloud(currentProfile.ownerEmail, updatedProfile).then(() => refreshData());
-    } else {
-      const myOwn = profiles.filter(p => !p.isShared).map(p => p.name === currentProfile.name ? updatedProfile : p);
-      setProfiles(prev => prev.map(p => p.name === currentProfile.name ? updatedProfile : p));
-      saveProfiles(myOwn);
-      syncDataToCloud(myOwn);
+    try {
+      if (currentProfile.isShared && currentProfile.ownerEmail) {
+        await updateSharedProjectOnCloud(currentProfile.ownerEmail, updatedProfile);
+        // Non facciamo refresh per non interrompere lo screening
+      } else {
+        const myOwn = profiles.filter(p => !p.isShared).map(p => p.name === currentProfile.name ? updatedProfile : p);
+        await syncDataToCloud(myOwn);
+        setProfiles(prev => prev.map(p => p.name === currentProfile.name ? updatedProfile : p));
+        saveProfiles(myOwn);
+      }
+    } catch (e) {
+      console.error("Autosave failed");
     }
   };
 

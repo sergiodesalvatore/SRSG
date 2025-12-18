@@ -3,7 +3,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { Article, Selections, Decision, ProjectSettings, SelectionData } from '../types';
 import * as XLSX from 'xlsx';
 import { 
-  Check, X, HelpCircle, Search, Users, UserCircle, Save, 
+  Check, X, HelpCircle, Search, UserCircle, Save, 
   Microscope, LayoutGrid, BookOpen, Tag, Plus, Eye, EyeOff, AlertTriangle, CheckCircle2, AlertCircle,
   Download, Filter, Trophy, PartyPopper
 } from 'lucide-react';
@@ -37,7 +37,6 @@ export const ScreeningInterface: React.FC<ScreeningInterfaceProps> = ({
   const [activeFilter, setActiveFilter] = useState<'all' | Decision>('all');
   const [showCompleteModal, setShowCompleteModal] = useState(false);
   
-  // Keyword Management State
   const [includeKws, setIncludeKws] = useState<{word: string, active: boolean}[]>(
     settings.includeKeywords.map(k => ({ word: k, active: true }))
   );
@@ -71,20 +70,17 @@ export const ScreeningInterface: React.FC<ScreeningInterfaceProps> = ({
     }
   }, [decidedCount, totalCount]);
 
-  // Real-time Highlighting Logic
   const highlightedAbstract = useMemo(() => {
     if (!currentArticle || !currentArticle.abstract) return '<p class="italic opacity-30 text-center py-20">No abstract available.</p>';
     
     let text = currentArticle.abstract;
     
-    // Process Inclusion Keywords (Green)
     includeKws.forEach(({word, active}) => {
       if (!word.trim() || !active) return;
       const regex = new RegExp(`(${word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
       text = text.replace(regex, '<mark class="bg-emerald-200 text-emerald-900 rounded px-1 font-bold transition-colors">$1</mark>');
     });
 
-    // Process Exclusion Keywords (Red)
     excludeKws.forEach(({word, active}) => {
       if (!word.trim() || !active) return;
       const regex = new RegExp(`(${word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
@@ -105,7 +101,6 @@ export const ScreeningInterface: React.FC<ScreeningInterfaceProps> = ({
     }];
     setSelections(prev => ({ ...prev, [currentArticle.id]: updated }));
     
-    // Auto-advance to next article if not the last one
     if (currentIndex < articles.length - 1) {
       setTimeout(() => {
         setCurrentIndex(c => c + 1);
@@ -128,7 +123,6 @@ export const ScreeningInterface: React.FC<ScreeningInterfaceProps> = ({
         'DOI': a.doi,
       };
 
-      // Add decisions per reviewer
       settings.assignedEmails.forEach(email => {
         const d = sels.find(s => s.reviewerId === email)?.decision || 'pending';
         row[`Decision (${email})`] = d;
@@ -210,7 +204,6 @@ export const ScreeningInterface: React.FC<ScreeningInterfaceProps> = ({
 
   return (
     <div className="h-screen flex flex-col bg-slate-50 overflow-hidden relative">
-      {/* Exit Confirmation Modal */}
       {showExitModal && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-slate-900/40 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="bg-white rounded-[32px] shadow-2xl max-w-sm w-full p-8 animate-in zoom-in duration-300">
@@ -245,7 +238,6 @@ export const ScreeningInterface: React.FC<ScreeningInterfaceProps> = ({
         </div>
       )}
 
-      {/* Completion Modal */}
       {showCompleteModal && (
         <div className="fixed inset-0 z-[101] flex items-center justify-center p-6 bg-slate-900/40 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="bg-white rounded-[40px] shadow-2xl max-w-md w-full p-10 text-center animate-in zoom-in duration-300">
@@ -277,15 +269,14 @@ export const ScreeningInterface: React.FC<ScreeningInterfaceProps> = ({
         </div>
       )}
 
-      {/* Header */}
       <header className="h-16 bg-white border-b px-6 flex items-center justify-between shadow-sm shrink-0 z-50">
         <div className="flex items-center gap-4">
           <div className="flex items-center gap-2">
-             <div className="h-9 w-9 bg-indigo-600 rounded-xl flex items-center justify-center text-white shadow-lg shadow-indigo-100">
+             <div className="h-9 w-9 bg-indigo-700 rounded-xl flex items-center justify-center text-white shadow-lg shadow-indigo-100">
                 <Microscope size={20} />
              </div>
              <div className="flex flex-col">
-                <span className="font-black text-slate-900 text-lg tracking-tighter leading-none">SCREENIE <span className="text-indigo-600">PRO</span></span>
+                <span className="font-black text-slate-900 text-lg tracking-tighter leading-none uppercase">SCREENY <span className="text-indigo-600">PRO</span></span>
                 <span className="text-[7px] font-black text-slate-400 uppercase tracking-[0.25em]">BY SRSG</span>
              </div>
           </div>
@@ -309,7 +300,7 @@ export const ScreeningInterface: React.FC<ScreeningInterfaceProps> = ({
 
         <div className="flex-1 max-w-xl px-12 hidden md:block">
            <div className="flex flex-col items-center">
-              <span className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2">{remainingCount} studies remaining to screen</span>
+              <span className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2">{remainingCount} studies remaining</span>
               <div className="w-full h-2.5 bg-slate-100 rounded-full overflow-hidden shadow-inner border border-slate-200">
                 <div 
                   className="h-full bg-gradient-to-r from-indigo-500 to-indigo-600 transition-all duration-700 ease-out"
@@ -323,7 +314,7 @@ export const ScreeningInterface: React.FC<ScreeningInterfaceProps> = ({
           <button 
             onClick={exportToExcel}
             className="p-2.5 bg-white border border-slate-200 text-slate-500 rounded-xl hover:text-indigo-600 hover:border-indigo-100 hover:bg-indigo-50 transition-all shadow-sm group"
-            title="Download Excel Summary"
+            title="Download Results"
           >
             <Download size={18} className="group-hover:translate-y-0.5 transition-transform" />
           </button>
@@ -343,7 +334,6 @@ export const ScreeningInterface: React.FC<ScreeningInterfaceProps> = ({
       </header>
 
       <div className="flex-1 flex overflow-hidden">
-        {/* Left Sidebar: Article List */}
         <aside className="w-72 bg-white border-r flex flex-col shrink-0">
           <div className="p-4 space-y-3 border-b">
             <div className="relative">
@@ -351,7 +341,7 @@ export const ScreeningInterface: React.FC<ScreeningInterfaceProps> = ({
               <input 
                 value={search} 
                 onChange={e => setSearch(e.target.value)} 
-                placeholder="Search..." 
+                placeholder="Search articles..." 
                 className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-100 rounded-xl text-[11px] font-bold focus:ring-2 ring-indigo-500/10 outline-none placeholder:text-slate-300" 
               />
             </div>
@@ -375,7 +365,7 @@ export const ScreeningInterface: React.FC<ScreeningInterfaceProps> = ({
             {filteredArticles.length === 0 ? (
                <div className="p-10 text-center flex flex-col items-center opacity-30">
                   <Filter size={32} className="mb-2" />
-                  <p className="text-[10px] font-bold">No results for this filter.</p>
+                  <p className="text-[10px] font-bold">No results found.</p>
                </div>
             ) : filteredArticles.map((a) => {
               const myDecision = selections[a.id]?.find(s => s.reviewerId === myEmail)?.decision;
@@ -405,13 +395,11 @@ export const ScreeningInterface: React.FC<ScreeningInterfaceProps> = ({
           </div>
         </aside>
 
-        {/* Center Main: Article Reader */}
         <main className="flex-1 flex flex-col bg-white overflow-hidden border-r">
           {currentArticle ? (
             <>
               <div className="flex-1 overflow-y-auto custom-scrollbar p-10 lg:p-14">
                 <div className="max-w-2xl mx-auto space-y-8">
-                  {/* Status Badges */}
                   <div className="flex flex-wrap gap-2 pb-6 border-b border-slate-100">
                      {settings.assignedEmails.map(email => {
                         const decision = selections[currentArticle.id]?.find(s => s.reviewerId === email)?.decision;
@@ -450,7 +438,6 @@ export const ScreeningInterface: React.FC<ScreeningInterfaceProps> = ({
                 </div>
               </div>
 
-              {/* Toolbar */}
               <div className="h-20 bg-white border-t flex items-center justify-center gap-3 px-8 shrink-0 shadow-[0_-4px_25px_rgba(0,0,0,0.03)] z-10">
                  <button onClick={() => handleDecision('exclude')} className="flex-1 max-w-[150px] py-3 bg-white border-2 border-rose-100 text-rose-500 rounded-xl font-black hover:bg-rose-600 hover:text-white hover:border-rose-600 transition-all flex items-center justify-center gap-2 text-[11px] group active:scale-95">
                     <X size={16} className="group-hover:scale-110 transition-transform"/> EXCLUDE
@@ -471,7 +458,6 @@ export const ScreeningInterface: React.FC<ScreeningInterfaceProps> = ({
           )}
         </main>
 
-        {/* Right Sidebar: Keyword Management */}
         <aside className="w-80 bg-slate-50/50 flex flex-col shrink-0">
           <div className="p-5 border-b bg-white">
             <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-4 flex items-center gap-2">
@@ -510,13 +496,12 @@ export const ScreeningInterface: React.FC<ScreeningInterfaceProps> = ({
           </div>
 
           <div className="flex-1 overflow-y-auto p-5 space-y-8 custom-scrollbar">
-            {/* Inclusion List */}
             <section>
               <h4 className="text-[9px] font-black text-emerald-600 uppercase tracking-widest mb-3 flex items-center gap-2">
-                <CheckCircle2 size={12}/> Good Keywords
+                <CheckCircle2 size={12}/> High Quality
               </h4>
               <div className="space-y-2">
-                {includeKws.length === 0 && <p className="text-[10px] text-slate-400 italic">None added.</p>}
+                {includeKws.length === 0 && <p className="text-[10px] text-slate-400 italic">No keywords added.</p>}
                 {includeKws.map(k => (
                   <div key={k.word} className={`flex items-center justify-between p-2.5 rounded-xl border transition-all ${k.active ? 'bg-white border-emerald-100' : 'bg-slate-50 border-slate-100 opacity-60'}`}>
                     <span className={`text-[11px] font-bold ${k.active ? 'text-emerald-900' : 'text-slate-400 line-through'}`}>{k.word}</span>
@@ -533,13 +518,12 @@ export const ScreeningInterface: React.FC<ScreeningInterfaceProps> = ({
               </div>
             </section>
 
-            {/* Exclusion List */}
             <section>
               <h4 className="text-[9px] font-black text-rose-600 uppercase tracking-widest mb-3 flex items-center gap-2">
-                <AlertTriangle size={12}/> Bad Keywords
+                <AlertTriangle size={12}/> Red Flags
               </h4>
               <div className="space-y-2">
-                {excludeKws.length === 0 && <p className="text-[10px] text-slate-400 italic">None added.</p>}
+                {excludeKws.length === 0 && <p className="text-[10px] text-slate-400 italic">No keywords added.</p>}
                 {excludeKws.map(k => (
                   <div key={k.word} className={`flex items-center justify-between p-2.5 rounded-xl border transition-all ${k.active ? 'bg-white border-rose-100' : 'bg-slate-50 border-slate-100 opacity-60'}`}>
                     <span className={`text-[11px] font-bold ${k.active ? 'text-rose-900' : 'text-slate-400 line-through'}`}>{k.word}</span>
@@ -559,7 +543,7 @@ export const ScreeningInterface: React.FC<ScreeningInterfaceProps> = ({
           
           <div className="p-5 bg-white border-t">
              <div className="p-3 bg-amber-50 rounded-xl border border-amber-100 text-[9px] text-amber-700 leading-tight">
-               <b>PRO TIP:</b> Keywords added here will be saved to your project settings when you click "Save Progress".
+               <b>TIP:</b> Keywords highlight text in the abstract to help you screen faster.
              </div>
           </div>
         </aside>

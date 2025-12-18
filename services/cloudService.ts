@@ -13,7 +13,7 @@ const getHeaders = (token?: string) => ({
 });
 
 export const signUp = async (email: string, pass: string) => {
-  if (!isCloudConfigured()) return { error: { message: "Servizio Cloud non configurato." } };
+  if (!isCloudConfigured()) return { error: { message: "Cloud service not configured." } };
   const cleanEmail = email.toLowerCase().trim();
   try {
     const res = await fetch(`${SUPABASE_URL}/auth/v1/signup`, {
@@ -22,7 +22,7 @@ export const signUp = async (email: string, pass: string) => {
       body: JSON.stringify({ email: cleanEmail, password: pass })
     });
     const data = await res.json();
-    if (!res.ok) throw new Error(data.msg || data.error?.message || "Errore registrazione");
+    if (!res.ok) throw new Error(data.msg || data.error?.message || "Registration error");
     return data;
   } catch (e: any) {
     return { error: { message: e.message } };
@@ -30,7 +30,7 @@ export const signUp = async (email: string, pass: string) => {
 };
 
 export const signIn = async (email: string, pass: string) => {
-  if (!isCloudConfigured()) return { error: { message: "Servizio Cloud non configurato." } };
+  if (!isCloudConfigured()) return { error: { message: "Cloud service not configured." } };
   const cleanEmail = email.toLowerCase().trim();
   try {
     const res = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=password`, {
@@ -39,7 +39,7 @@ export const signIn = async (email: string, pass: string) => {
       body: JSON.stringify({ email: cleanEmail, password: pass })
     });
     const data = await res.json();
-    if (!res.ok) throw new Error(data.error_description || data.error?.message || "Credenziali non valide.");
+    if (!res.ok) throw new Error(data.error_description || data.error?.message || "Invalid credentials.");
     if (data.access_token) {
       localStorage.setItem('srsg_token', data.access_token);
       localStorage.setItem('srsg_user', cleanEmail);
@@ -75,25 +75,19 @@ export const fetchSharedProjects = async (myEmail: string): Promise<Profile[]> =
   
   try {
     const myId = localStorage.getItem('srsg_user_id');
-    // Chiediamo esplicitamente tutti i profili dove il JSON contiene l'email
     const res = await fetch(`${SUPABASE_URL}/rest/v1/user_profiles?select=id,data,email`, {
       method: 'GET',
       headers: getHeaders(token)
     });
     
-    if (!res.ok) {
-        console.error("Fetch shared failed with status:", res.status);
-        return [];
-    }
+    if (!res.ok) return [];
     
     const allUsersData = await res.json();
     let shared: Profile[] = [];
     
     allUsersData.forEach((row: any) => {
       if (row.id === myId) return;
-
       const userProjects: Profile[] = Array.isArray(row.data) ? row.data : [];
-      
       const foundInRow = userProjects.filter(p => {
         const assigned = p.settings?.assignedEmails || [];
         return assigned.some(email => email.toLowerCase().trim() === cleanMyEmail);
@@ -102,13 +96,11 @@ export const fetchSharedProjects = async (myEmail: string): Promise<Profile[]> =
         isShared: true,
         ownerEmail: row.email || "Colleague"
       }));
-      
       shared = [...shared, ...foundInRow];
     });
     
     return shared;
   } catch (e) {
-    console.error("Critical Cloud Error:", e);
     return [];
   }
 };
@@ -117,20 +109,35 @@ export const syncDataToCloud = async (profiles: Profile[]) => {
   const token = localStorage.getItem('srsg_token');
   const userId = localStorage.getItem('srsg_user_id');
   const email = localStorage.getItem('srsg_user');
+  
   if (!token || !userId) return;
+
   try {
-    await fetch(`${SUPABASE_URL}/rest/v1/user_profiles`, {
+    const payload = { 
+      id: userId, 
+      email: email?.toLowerCase().trim(), 
+      data: profiles, 
+      updated_at: new Date().toISOString() 
+    };
+
+    // Usiamo on-conflict=id per gestire correttamente l'aggiornamento (upsert)
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/user_profiles`, {
       method: 'POST',
-      headers: { ...getHeaders(token), 'Prefer': 'resolution=merge-duplicates' },
-      body: JSON.stringify({ 
-        id: userId, 
-        email: email?.toLowerCase().trim(), 
-        data: profiles, 
-        updated_at: new Date().toISOString() 
-      })
+      headers: { 
+        ...getHeaders(token), 
+        'Prefer': 'resolution=merge-duplicates,on-conflict=id,return=minimal' 
+      },
+      body: JSON.stringify(payload)
     });
+    
+    if (!res.ok) {
+      const errText = await res.text();
+      console.error("Supabase Sync Error:", res.status, errText);
+      throw new Error(`Sync failed: ${errText}`);
+    }
   } catch (e) {
-    console.error("Sync failed", e);
+    console.error("Critical Sync Failure", e);
+    throw e;
   }
 };
 
@@ -138,7 +145,6 @@ export const updateSharedProjectOnCloud = async (ownerEmail: string, updatedProj
   const token = localStorage.getItem('srsg_token');
   if (!token || !ownerEmail) return;
   try {
-    // Cerchiamo l'ID dell'owner tramite la sua email
     const res = await fetch(`${SUPABASE_URL}/rest/v1/user_profiles?email=eq.${ownerEmail.toLowerCase().trim()}&select=id,data`, {
       method: 'GET',
       headers: getHeaders(token)
@@ -150,14 +156,14 @@ export const updateSharedProjectOnCloud = async (ownerEmail: string, updatedProj
 
     const ownerId = result[0].id;
     const ownerData: Profile[] = Array.isArray(result[0].data) ? result[0].data : [];
-
-    // Sostituiamo solo il progetto aggiornato nell'array dell'owner
     const updatedData = ownerData.map(p => p.name === updatedProject.name ? updatedProject : p);
 
-    // Salviamo l'intero array aggiornato nella riga dell'owner
     await fetch(`${SUPABASE_URL}/rest/v1/user_profiles`, {
       method: 'POST',
-      headers: { ...getHeaders(token), 'Prefer': 'resolution=merge-duplicates' },
+      headers: { 
+        ...getHeaders(token), 
+        'Prefer': 'resolution=merge-duplicates,on-conflict=id' 
+      },
       body: JSON.stringify({ 
         id: ownerId, 
         data: updatedData, 
