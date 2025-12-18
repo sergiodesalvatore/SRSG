@@ -426,12 +426,12 @@ export const ScreeningInterface: React.FC<ScreeningInterfaceProps> = ({
                       </div>
                       <span className="bg-slate-100 text-slate-500 px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest border border-slate-200">PMID: {currentArticle.pmid}</span>
                     </div>
-                    <h1 className="text-2xl lg:text-3xl font-black text-slate-900 leading-tight tracking-tight">{currentArticle.title}</h1>
+                    <h1 className="text-xl lg:text-2xl font-black text-slate-900 leading-tight tracking-tight">{currentArticle.title}</h1>
                     <div className="p-3 bg-slate-50 rounded-xl border border-dashed border-slate-200 max-h-48 overflow-y-auto custom-scrollbar">
-                       <span className="text-[11px] font-bold text-slate-500 italic leading-snug">{currentArticle.authors}</span>
+                       <span className="text-[10px] font-bold text-slate-500 italic leading-snug">{currentArticle.authors}</span>
                     </div>
                     <div 
-                      className="pt-6 text-base lg:text-lg text-slate-700 leading-relaxed font-serif-reading selection:bg-indigo-100"
+                      className="pt-6 text-sm lg:text-base text-slate-700 leading-relaxed font-serif-reading selection:bg-indigo-100"
                       dangerouslySetInnerHTML={{ __html: highlightedAbstract }}
                     />
                   </div>
